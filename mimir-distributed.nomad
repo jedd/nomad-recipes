@@ -57,6 +57,13 @@ job "mimir-distributed" {
           "-target=query-frontend",
           "-server.http-listen-port=10901"
         ]
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
       }
       resources {
         cpu    = 500
@@ -89,6 +96,13 @@ job "mimir-distributed" {
           "-compactor.ring.consul.acl-token=REDACTED",
           "-compactor.ring.consul.hostname=consul.service.dg.collectors.int.jeddi.org:8500"          
         ]
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
       }
       resources {
         cpu    = 500
@@ -123,6 +137,13 @@ job "mimir-distributed" {
           "-distributor.ring.consul.acl-token=REDACTED",
           "-distributor.ring.consul.hostname=consul.service.dg.collectors.int.jeddi.org8500"
         ]
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
       }
       resources {
         cpu    = 500
@@ -156,6 +177,13 @@ job "mimir-distributed" {
           "-ingester.ring.consul.acl-token=REDACTED",
           "-ingester.ring.consul.hostname=consul.service.dg.collectors.int.jeddi.org:8500",
         ]
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
       }
       resources {
         cpu    = 500
@@ -188,6 +216,13 @@ job "mimir-distributed" {
           "-store-gateway.sharding-ring.consul.acl-token=REDACTED",
           "-store-gateway.sharding-ring.consul.hostname=consul.service.dg.collectors.int.jeddi.org:8500"
         ]
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
       }
       resources {
         cpu    = 500
@@ -216,6 +251,13 @@ job "mimir-distributed" {
         args = [
           "-target=querier"
         ]
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
       }   
       resources {
         cpu    = 500

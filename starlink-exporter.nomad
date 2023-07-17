@@ -35,6 +35,14 @@ job "starlink-exporter" {
           "9817",
         ]
 
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
+
       }
 
       service {
