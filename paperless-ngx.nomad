@@ -1,29 +1,36 @@
 
 // paperless-ngx - personal document management system
+//   with redis, postgresql database, a postgresql backup (daily) script, and tika/gotenberg
 
-// 2023-07-17 - current state is that the system works, but has not been heavily tested:
-//
-//   You need to create a superuser (see below) or adjust the env 
-//   variables (see long way below).
-// 
-//   You need a persistent volume - mine is called 'vol_paperless_ngx' and it lives on 
-//   NFS, so inotify does NOT work for me.
-//
-//   The ./trash/ folder is NOT being respected, and I don't know why - it's not a 
-//   priority for me, and doesn't seem to break anything.
-//
-//   I don't know how much I trust the postgresql shutdown (SIGTERM), or indeed 
-//   redis (that shouldn't be breakable) or paperless itself (no idea).
-//
-//   Email doesn't work at all, haven't even tried getting that routing into this.
+// Changes from previous version(s):
+//  -  using nomad docker-plugin volumes so I can use absolute paths without creating host_volumes
+//  -  tika and gotenberg have been enabled, but not heavily tested - a simple .odt (openoffice)
+//       format file has been processed successfully.
+//  -  the db-backup container hasn't been tested well, especially rollback / recovery - the intent
+//       is that the whole persistent datastore location is periodically snapshotted outside the job.
+//  -  email (incoming, or outgoing) does not work, and probably will remain a low priority for me.
+
+// Naturally you'll need to change all my references to /opt/sharednfs/paperless-ngx to your
+// persistent storage path.  Unfortunately Nomad jobs can't conveniently use variables for
+// such things (short of going that 'via a template' wonky method).
+
+// Similarly the loki target.
 
 
 // Creating a superuser is needed on first run - this is done manually by
-// summoning a shell in the primary container/task as follows, or use the
-// PAPERLESS_ADMIN_USER (and _PASSWORD) in the paperless task below.
+// summoning a shell in the primary container/task, and then:
 // #  cd /usr/src/paperless/src
 // #  python3 manage.py createsuperuser
 // Then creating a 'root' user with a secret password.
+
+variables {
+  image_paperless = "ghcr.io/paperless-ngx/paperless-ngx:latest"
+  image_redis = "docker.io/library/redis:7"
+  image_postgresql = "docker.io/library/postgres:15"
+  image_tika = "ghcr.io/paperless-ngx/tika:latest"
+  image_gotenberg = "docker.io/gotenberg/gotenberg:7.8"
+}
+
 
 job "paperless-ngx" {
   datacenters = ["DG"]
@@ -33,8 +40,7 @@ job "paperless-ngx" {
   constraint {
     attribute = "${attr.unique.hostname}"
     operator = "regexp"
-    # value = "dg-hac-0[123]"
-    value = "dg-hac-0[1]"
+    value = "dg-hac-0[123]"
   }
 
   group "paperless-ngx" {
@@ -48,12 +54,12 @@ job "paperless-ngx" {
       port "port_paperless_db" {
         to = 5432
       }
-    }
-
-    volume "vol_paperless_ngx"  {
-      type = "host"
-      source = "vol_paperless_ngx"
-      read_only = false
+      port "port_tika" {
+        to = 9998
+      }
+      port "port_gotenberg" {
+        to = 3000
+      }
     }
 
     restart {
@@ -62,32 +68,20 @@ job "paperless-ngx" {
       delay    = "30s"
     }
 
-#   constraint {
-#     attribute = "${attr.unique.hostname}"
-#     operator = "regexp"
-#     value = "dg-hac-0[123]"
-#   }
-
 
     # TASK - broker = = = = = = = = = = = = = = = = = = = = = = = = =
     task "broker" {
       driver = "docker"
 
       # Try to give Redis a moment while to terminate sanely.
-      kill_timeout = "10s"
+      kill_timeout = "30s"
       kill_signal = "SIGTERM"
-
-      volume_mount {
-        volume = "vol_paperless_ngx"
-        destination = "/persistent"
-        read_only = false
-      }
 
       env = {
       }
 
       config {
-        image = "docker.io/library/redis:7"
+        image = "${var.image_redis}"
 
         args = [
           "/etc/redis.conf",
@@ -96,12 +90,13 @@ job "paperless-ngx" {
           "--loglevel",  "warning",
         ]
 
-        dns_servers = ["192.168.27.123"]
-
         ports = ["port_paperless_redis"]
+
+        # privileged = true
 
         volumes = [
           "local/redis.conf:/etc/redis.conf",
+          "/opt/sharednfs/paperless-ngx/redis-data:/persistent/redis-data"
         ]
 
         logging  {
@@ -111,7 +106,6 @@ job "paperless-ngx" {
             loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
           }
         }
-
       }
 
       resources {
@@ -135,7 +129,9 @@ job "paperless-ngx" {
 
       template {
         data = <<EOH
+
 DIR /persistent/redis-data
+
 EOH
         destination = "local/redis.conf"
       }
@@ -150,25 +146,24 @@ EOH
       kill_timeout = "30s"
       kill_signal = "SIGTERM"
 
-      volume_mount {
-        volume = "vol_paperless_ngx"
-        destination = "/persistent"
-        read_only = false
-      }
 
       env = {
         "PGDATA" = "/persistent/postgresql/data",
         "POSTGRES_DB" = "paperless"
         "POSTGRES_USER" = "paperless"
-        "POSTGRES_PASSWORD" = "bigsecret"
+        "POSTGRES_PASSWORD" = "paperless"
       }
 
       config {
-        image = "docker.io/library/postgres:15"
-
-        dns_servers = ["192.168.27.123"]
+        image = "${var.image_postgresql}"
 
         ports = ["port_paperless_db"]
+
+        # privileged = true
+
+        volumes = [
+          "/opt/sharednfs/paperless-ngx/postgresql:/persistent/postgresql"
+        ]
 
         logging  {
           type = "loki"
@@ -208,12 +203,6 @@ EOH
       kill_timeout = "30s"
       kill_signal = "SIGTERM"
 
-      volume_mount {
-        volume = "vol_paperless_ngx"
-        destination = "/persistent"
-        read_only = false
-      }
-
       env = {
 
         # Only enable these on first run, and only if you can't or don't want
@@ -223,18 +212,20 @@ EOH
 
         "PAPERLESS_REDIS"  = "redis://${NOMAD_ADDR_port_paperless_redis}",
 
+        "PAPERLESS_DBENGINE" = "postgresql",
+
         "PAPERLESS_DBHOST" = "${NOMAD_IP_port_paperless_db}",
         "PAPERLESS_DBPORT" = "${NOMAD_HOST_PORT_port_paperless_db}",
 
         "PAPERLESS_DBUSER" = "paperless",
-        "PAPERLESS_DBPASS" = "bigsecret",
+        "PAPERLESS_DBPASS" = "paperless",
         "PAPERLESS_DBNAME" = "paperless",
 
         "PAPERLESS_URL" = "http://paperless.obs.int.jeddi.org",
 
         # This is need IFF you don't have inotify (say, /persistent/consume is on NFS).
         # Defaults for PAPERLESS_CONSUMER_POLLING_RETRY and _DELAY are both 5s.
-        "PAPERLESS_CONSUMER_POLLING"   = "10",
+        "PAPERLESS_CONSUMER_POLLING"   = "30",
 
         # This is preferred as it auto-tags files with the path - eg, consume/foo/bar/my-file.pdf,
         # would be imported with 'foo' and 'bar' tags.
@@ -247,14 +238,29 @@ EOH
         "PAPERLESS_MEDIA_ROOT"       = "/persistent/media",
         "PAPERLESS_LOGGING_DIR"      = "/persistent/log",
 
+        "PAPERLESS_TIKA_ENABLED" = "1",
+        "PAPERLESS_TIKA_ENDPOINT" = "http://${NOMAD_ADDR_port_tika}",
+        "PAPERLESS_TIKA_GOTENBERG_ENDPOINT" = "http://${NOMAD_ADDR_port_gotenberg}",
+        
+
+        "PAPERLESS_TIME_ZONE" = "Australia/Sydney",
+
       }
 
       config {
-        image = "ghcr.io/paperless-ngx/paperless-ngx:latest"
-
-        dns_servers = ["192.168.27.123"]
+        image = "${var.image_paperless}"
 
         ports = ["port_paperless"]
+
+        # privileged = true
+
+        volumes = [
+          "/opt/sharednfs/paperless-ngx/consume:/persistent/consume",
+          "/opt/sharednfs/paperless-ngx/data:/persistent/data",
+          "/opt/sharednfs/paperless-ngx/trash:/persistent/trash",
+          "/opt/sharednfs/paperless-ngx/media:/persistent/media",
+          "/opt/sharednfs/paperless-ngx/log:/persistent/log",
+        ]
 
         logging  {
           type = "loki"
@@ -266,8 +272,8 @@ EOH
       }
 
       resources {
-        cpu = 700
-        memory = 1200
+        cpu = 1600
+        memory = 1500
         memory_max = 2500
       }
 
@@ -291,6 +297,195 @@ EOH
 #        }
       }
     } // end-task paperless
+
+
+    # task postgresql-backup = = = = = = = = = = = = = = = = = = = = = = = = =
+    task "db-backup" {
+      driver = "docker"
+
+      kill_signal = "SIGTERM"      
+
+      config {
+        image = "${var.image_postgresql}"
+
+        command = "/backup-looper.sh"
+
+        volumes = [
+          "local/backup-looper.sh:/backup-looper.sh",
+          "/opt/sharednfs/paperless-ngx/BACKUPS/db:/persistent/BACKUPS",
+        ]
+
+        logging {
+          type = "loki"
+          config {
+            loki-url = "http://loki.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME},env=test"
+          }
+        }
+
+      }
+
+      env = {
+        # It's just easier if we have local timezone inside the container.
+        "TZ" = "Australia/Sydney",
+      }
+
+      resources {
+        cpu = 200
+        memory = 200
+        memory_max = 300
+      }
+
+      service {
+        name = "db-backup"
+      }
+
+      #  FILE:   backup-looper.sh
+      #  This is our over-ridden entry point - we're just here for pg_dump but use the same 
+      #  postgresql *server* image as we've already got it in cache on this host AND we get
+      #  guaranteed client / server version alignment for free.
+      template {
+        data = <<EOH
+#! /usr/bin/env bash
+
+# Heavily opinionated backup script for small PostgreSQL database
+#
+# Sleep regularly, wake up to detect if we're in one of the right windows for the
+# day (typically once a day, but can be adjusted below).  If so, perform a db dump
+# then return to sleep.
+
+TARGETDIR=/persistent/BACKUPS
+
+if [ !  -d ${TARGETDIR} ]
+then
+  mkdir -p ${TARGETDIR}
+fi
+
+# Feeding a password to pg_dump is easier if we just use the ~/.pgpass convention
+# in format:  hostname:port:database:username:password
+echo {{ env "NOMAD_ADDR_port_paperless_db" }}:paperless:paperless:paperless > ~/.pgpass
+
+# Must be set to limited rights or else it ignores the file.
+chmod 600 ~/.pgpass
+
+while [ 1 ]
+do
+  # Sleep first, as the database is typically not ready on instantiation anyway
+  sleep 1h
+
+  HOUR=`date "+%H"`
+  TARGETFILE=paperless_postgresql_db_backup_`date "+%a-%H"`H.sql
+
+  # Multi-value alternative:
+  # if [ ${HOUR} -eq 08 ] || [ ${HOUR} -eq 16 ] || [ ${HOUR} -eq 23 ] 
+
+  # Daily option:
+  if [ ${HOUR} -eq 23 ]
+  then
+    # First - remove the 1-week old archive
+    rm ${TARGETDIR}/${TARGETFILE}.gz
+
+    # pg_dump requires the following params despite them being in pgpass - pgpass is a pattern
+    # matching file only, and password is retrieved when user/db/addr matches.
+    pg_dump -f ${TARGETDIR}/${TARGETFILE}                     \
+            -Fc                                               \
+            -d paperless                                      \
+            -U paperless                                      \
+            -h {{ env "NOMAD_HOST_IP_port_paperless_db" }}    \
+            -p {{ env "NOMAD_HOST_PORT_port_paperless_db" }}       
+
+    # The -Fc format is recommended - ostensibly it is compressed but in practice not optimally,
+    # so we compress properly with gzip as the final step.
+    gzip --best ${TARGETDIR}/${TARGETFILE}
+  fi
+done
+
+EOH
+        destination = "local/backup-looper.sh"
+        perms = "755"
+      }
+    }    #  end-task db-backup
+
+
+    # TASK - tika  = = = = = = = = = = = = = = = = = = = = = = = = =
+    task "tika" {
+      driver = "docker"
+
+      kill_timeout = "30s"
+      kill_signal = "SIGTERM"
+
+      env = {
+      }
+
+      config {
+        image = "${var.image_tika}"
+        
+        ports = ["port_tika"]
+
+        # privileged = true
+
+        volumes = [ ]
+
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
+      }
+
+      resources {
+        cpu = 200
+        memory = 500
+        memory_max = 1024
+      }
+
+    } // end-task tika
+
+
+    # TASK - gotenberg  = = = = = = = = = = = = = = = = = = = = = = = = =
+    task "gotenberg" {
+      driver = "docker"
+
+      kill_timeout = "30s"
+      kill_signal = "SIGTERM"
+
+      env = {
+      }
+
+      config {
+        image = "${var.image_gotenberg}"
+        
+        ports = ["port_gotenberg"]
+
+        # privileged = true
+
+        volumes = [ ]
+
+        command = "gotenberg"
+
+        args = [
+          "--chromium-disable-javascript=true",
+          "--chromium-allow-list=file:///tmp/.*",
+        ]
+
+        logging  {
+          type = "loki"
+          config {
+            loki-url = "http://dg-pan-01.int.jeddi.org:3100/loki/api/v1/push"
+            loki-external-labels = "job=${NOMAD_JOB_ID},task=${NOMAD_TASK_NAME}"
+          }
+        }
+      }
+
+      resources {
+        cpu = 200
+        memory = 500
+        memory_max = 1024
+      }
+
+    } // end-task gotenberg
 
   }
 }
