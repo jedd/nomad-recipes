@@ -223,9 +223,19 @@ EOH
 
         "PAPERLESS_URL" = "http://paperless.obs.int.jeddi.org",
 
-        # This is need IFF you don't have inotify (say, /persistent/consume is on NFS).
-        # Defaults for PAPERLESS_CONSUMER_POLLING_RETRY and _DELAY are both 5s.
-        "PAPERLESS_CONSUMER_POLLING"   = "30",
+        # Because we're using NFS, we can't use inotify - so we need to use these
+        # trio of settings, with a fair bit of delay as we're ALSO sending pdf's
+        # over the wifi network, and larger documents combined with default settings
+        # for these may result in abandoned pdf's in the ./consume/ directory.
+        # (Default retry configuration is way aggressive - 5 retries but with only
+        # 5s delay between those retries, and we can easily exceed 25s for a file
+        # to be in transit and growing on disk.)
+        #
+        # Here we are setting 8 retries, with 30s delays, with a basic 60s polling interval.
+        #
+        "PAPERLESS_CONSUMER_POLLING_RETRY_COUNT"   = "8",
+        "PAPERLESS_CONSUMER_POLLING_DELAY"         = "30",
+        "PAPERLESS_CONSUMER_POLLING"               = "60",
 
         # This is preferred as it auto-tags files with the path - eg, consume/foo/bar/my-file.pdf,
         # would be imported with 'foo' and 'bar' tags.
@@ -241,7 +251,6 @@ EOH
         "PAPERLESS_TIKA_ENABLED" = "1",
         "PAPERLESS_TIKA_ENDPOINT" = "http://${NOMAD_ADDR_port_tika}",
         "PAPERLESS_TIKA_GOTENBERG_ENDPOINT" = "http://${NOMAD_ADDR_port_gotenberg}",
-        
 
         "PAPERLESS_TIME_ZONE" = "Australia/Sydney",
 
