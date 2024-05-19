@@ -71,6 +71,9 @@ job "paperless-ngx" {
 
     # TASK - broker = = = = = = = = = = = = = = = = = = = = = = = = =
     task "broker" {
+
+      # The broker is effectively the redis cache
+
       driver = "docker"
 
       # Try to give Redis a moment while to terminate sanely.
@@ -140,6 +143,9 @@ EOH
 
     # TASK - db = = = = = = = = = = = = = = = = = = = = = = = = =
     task "db" {
+
+      # The db PostgreSQL
+
       driver = "docker"
 
       # Try to give PostgreSQL a little while to terminate sanely.
@@ -196,6 +202,9 @@ EOH
 
     # TASK - paperless = = = = = = = = = = = = = = = = = = = = = = = = =
     task "paperless" {
+
+      # Paperless is the actual web-frontend + application backend
+
       driver = "docker"
 
       # Less useful than db (postgresql) above, but more polite than default SIGKILL,
@@ -254,6 +263,12 @@ EOH
 
         "PAPERLESS_TIME_ZONE" = "Australia/Sydney",
 
+        # On smaller systems, or even in the case of Very Large Documents, the consumer may
+        # explode, complaining about how it's "unable to extend pixel cache". In such cases,
+        # try setting this to a reasonably low value, like 32. The default is to use whatever
+        # is necessary to do everything without writing to disk, and units are in megabytes.
+        # "PAPERLESS_CONVERT_MEMORY_LIMIT" = 32,
+
       }
 
       config {
@@ -310,6 +325,9 @@ EOH
 
     # task postgresql-backup = = = = = = = = = = = = = = = = = = = = = = = = =
     task "db-backup" {
+      
+      # db-backup is a custom instance using PostgreSQL image, but only for the client, to perform periodic backups.
+
       driver = "docker"
 
       kill_signal = "SIGTERM"      
@@ -418,6 +436,9 @@ EOH
 
     # TASK - tika  = = = = = = = = = = = = = = = = = = = = = = = = =
     task "tika" {
+
+      # Tika is used to parse Office documents (docx, odt, etc).  It is tightly coupled with Gotenberg.
+
       driver = "docker"
 
       kill_timeout = "30s"
@@ -455,6 +476,9 @@ EOH
 
     # TASK - gotenberg  = = = = = = = = = = = = = = = = = = = = = = = = =
     task "gotenberg" {
+
+      # gotenberg is an API for PDF files - it is tightly coupled with Tika
+
       driver = "docker"
 
       kill_timeout = "30s"
