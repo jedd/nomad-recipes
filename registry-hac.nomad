@@ -1,8 +1,8 @@
 
-# Jedd lab - registry - a combination of 'distribution' and 'registry ui'
+# Jedd lab - registry - a combination of 'distribution' and 'registry ui'.
 
-# hac refers to 'high availability cluster' (somewhat misnamed as my potential
-# Nomad VMs are all running on the same physical server).
+# hac refers to 'high availability cluster' (somewhat misnamed as my 
+# Nomad VMs all run on a single physical server).
 
 # Documentation:   https://distribution.github.io/distribution/
 # Configuration:   https://hub.docker.com/r/joxit/docker-registry-ui
@@ -12,17 +12,19 @@
 
 # Refer:  https://github.com/distribution/distribution
 
-# When I initially built this, I had no internal network SSL, but have since
-# got letsencrypt working, which reduces some of the previous sharp edges.
+# When I initially built this, I had no internal network TLS, but have since
+# got letsencrypt working - this removes some sharp edges.
 #
-# For example, without SSL, you need to set 'insecure-registries' in your
-# docker configuratio.
+# For example, without TLS, you need to set 'insecure-registries' in each
+# node's docker configuration files.
 
-# Troubleshooting:
+
+# Troubleshooting / usage:
+
 # To validate a) contents, and b) persistent storage, you can query the
 # contents of your registry with something like:
 #  curl -X GET https://registry.obs.int.jeddi.org/v2/_catalog
-#
+
 # To see tags for a repo:
 #  curl -X GET https://registry.obs.int.jeddi.org/v2/traefik/tags/list
 
@@ -47,12 +49,14 @@
 #     storage / delete / enabled = true
 # .. but will still need purging.  (Refer below.)
 
+# If you share a network with people you don't trust, you'll need to tidy
+# up the ACL / auth[nz] side of things, which I've blissfully ignored here.
 
 
 # Variables  = = = = = = = = = = = = = = = = = = = = = = = = = = = = =
 // As of 2025 I'm now configuring my jobs to run at either of my locations,
-// and using environment variable to identify / force this when running
-// jobs via bash using the nomad CLI.
+// specifically via the env variable  NOMAD_VAR_nomad_dc=DG (f.e.) to identify
+// and configure the target DC when launching jobs via the Nomad CLI.
 variable "nomad_dc" {
   type = string
   default = ""
@@ -60,8 +64,9 @@ variable "nomad_dc" {
 }
 
 locals {
-  # For basically ALL OTHER containers on my network, I refer to registry.obs.int.jeddi.org,
-  # but obviously bootstrapping _that_ requires these come from docker hub.
+  # For basically ALL OTHER containers on my network, I will refer to _this_ system to
+  # obtain images - registry.obs.int.jeddi.org - but obviously this job needs to be
+  # bootstrappable in its own absence, as it were - so I pull from docker hub.
   image_distribution = "registry:2.8.3"
   image_registry_ui = "joxit/docker-registry-ui:main"
 
