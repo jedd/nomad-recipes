@@ -16,3 +16,10 @@ I utilise Hashicorp Consul as well, partly for its key-value functionality but a
 
 Finally, note that Hashicorp is building out a registry using Nomad Pack - available at: https://github.com/hashicorp/nomad-pack-community-registry however as of mid-2022 it could still be considered inchoate. These Nomad Packs use a template (.tpl) with metadata & variables (.hcl) combo, and while this abstraction is certainly much more Enterprisey, it's less readable IMO.
 
+
+2025 additional notes
+
+I run two lab sites, but they both use `int.jeddi.org` for their domain, both with letsencrypt certs - and the Nomad clusters in both locations also have their own (via local DNS) `obs.int.jeddi.org` with valid SSL certs, managed by Traefik.
+
+I'm using the env var `NOMAD_VAR_nomad_dc=DG` approach at my two sites (PY, DG) so that more of my jobs can be run at either location, and they work out where they are from that variable. This works well, and jobs that can really only be run at one site (due to compute requirements, say) just hard code the DC constraint.
+
